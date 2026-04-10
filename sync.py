@@ -25,16 +25,23 @@ TZ_CN = timezone(timedelta(hours=8))
 
 
 # ============ 工具函数 ============
-def api_call(url, method="GET", body=None, headers=None):
-    """通用 API 请求"""
+def api_call(url, method="GET", body=None, headers=None, retries=3):
+    """通用 API 请求（带重试）"""
+    import time
     hdrs = headers or {}
     req = Request(url, method=method, data=json.dumps(body).encode() if body else None, headers=hdrs)
-    try:
-        resp = urlopen(req)
-        return json.loads(resp.read())
-    except Exception as e:
-        print(f"[ERROR] API call failed: {e}", file=sys.stderr)
-        sys.exit(1)
+    for attempt in range(retries):
+        try:
+            resp = urlopen(req)
+            return json.loads(resp.read())
+        except Exception as e:
+            if attempt < retries - 1 and "429" in str(e):
+                wait = 3 * (attempt + 1)
+                print(f"[WARN] 限流，等待 {wait}s 后重试...", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            print(f"[ERROR] API call failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 def getnote_get(path):
