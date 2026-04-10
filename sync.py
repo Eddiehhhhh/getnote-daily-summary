@@ -3,9 +3,9 @@
 Get 笔记「每日总结」→ Notion 日记中心 自动同步
 
 流程：
-1. 从 Get 笔记 API 拉取昨天的笔记列表
-2. 筛选标题或内容包含「每日总结」的笔记
-3. 在 Notion 日记中心找到昨天的记录
+1. 从 Get 笔记 API 拉取前一天的笔记列表
+2. 筛选 tags 包含「每日总结」的笔记
+3. 在 Notion 日记中心找到前一天的记录
 4. 将「每日总结」内容写入「总结」字段
 """
 
@@ -111,52 +111,43 @@ def fetch_getnote_notes():
     return all_notes
 
 
-def find_daily_summary(notes, yesterday_date):
-    """从笔记中筛选标题或内容包含「每日总结」的"""
+def find_daily_summary(notes, target_date):
+    """从笔记中筛选 tags 包含「每日总结」的"""
     candidates = []
     for note in notes:
         created_at = note.get("created_at", "")
-        # 只看昨天的笔记
-        if not created_at.startswith(yesterday_date):
+        # 只看目标日期的笔记
+        if not created_at.startswith(target_date):
             continue
 
-        title = note.get("title", "")
-        content = note.get("content", "")
+        tags = note.get("tags", [])
+        tag_names = [t.get("name", "") for t in tags]
+
+        # 检查 tags 是否包含「每日总结」
+        if "每日总结" not in tag_names:
+            continue
+
         note_id = note.get("note_id", "")
         note_type = note.get("note_type", "")
+        title = note.get("title", "")
+        content = note.get("content", "")
 
-        # 检查标题或内容是否包含「每日总结」
-        if "每日总结" in title or "每日总结" in content:
-            # 提取实际总结内容（去掉开头的「每日总结」标记）
-            summary_text = content
-            if "每日总结" in title:
-                # 标题就是标记，内容就是总结
-                pass
-            else:
-                # 内容中包含，去掉标记行
-                lines = content.split("\n")
-                filtered = []
-                started = False
-                for line in lines:
-                    if "每日总结" in line and not started:
-                        started = True
-                        # 去掉这一行中的「每日总结」部分
-                        line = line.replace("每日总结", "").strip("：: \t")
-                        if line:
-                            filtered.append(line)
-                        continue
-                    if started:
-                        filtered.append(line)
-                if filtered:
-                    summary_text = "\n".join(filtered).strip()
+        # 对于录音类型，拉取详情获取完整转写
+        if note_type in ("recorder_flash_audio", "recorder_audio", "audio", "meeting", "internal_record", "local_audio", "class_audio"):
+            print(f"[INFO] 拉取录音笔记详情: {title}")
+            detail = get_note_detail(note_id)
+            detail_note = detail.get("data", {}).get("note", {})
+            full_content = detail_note.get("content", "")
+            if full_content:
+                content = full_content
 
-            candidates.append({
-                "note_id": note_id,
-                "title": title,
-                "content": summary_text,
-                "type": note_type,
-                "created_at": created_at,
-            })
+        candidates.append({
+            "note_id": note_id,
+            "title": title,
+            "content": content.strip(),
+            "type": note_type,
+            "created_at": created_at,
+        })
 
     return candidates
 
