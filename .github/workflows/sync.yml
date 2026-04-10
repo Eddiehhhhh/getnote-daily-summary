@@ -2,8 +2,8 @@ name: Sync Daily Summary
 
 on:
   schedule:
-    # 每天凌晨 2:00 (UTC+8) = 18:00 UTC (前一天)
-    - cron: '0 18 * * *'
+    # 每 5 分钟轮询一次（实时同步）
+    - cron: '*/5 * * * *'
   workflow_dispatch: # 手动触发
 
 jobs:

@@ -2,11 +2,9 @@
 """
 Get 笔记「每日总结」→ Notion 日记中心 自动同步
 
-流程：
-1. 从 Get 笔记 API 拉取前一天的笔记列表
-2. 筛选 tags 包含「每日总结」的笔记
-3. 在 Notion 日记中心找到前一天的记录
-4. 将「每日总结」内容写入「总结」字段
+两种模式：
+- 实时模式（每 5 分钟触发）：检查今天 00:00 ~ now 的笔记，找到新的「每日总结」立刻同步
+- 兜底模式（凌晨 2 点触发）：检查昨天的笔记，确保不漏
 """
 
 import json
@@ -84,30 +82,40 @@ def notion_patch(path, body):
 
 
 # ============ 主逻辑 ============
-def get_target_date():
+def get_mode():
+    """根据当前时间决定运行模式。
+    
+    实时模式：06:00 ~ 23:55 (UTC+8)，每 5 分钟触发，检查今天的笔记
+    兜底模式：00:00 ~ 05:55 (UTC+8)，检查昨天的笔记（覆盖凌晨说的总结）
     """
-    获取目标日期（前一天）。
-    凌晨 2 点触发，目标是"昨天"。
-    例如：4/9 凌晨 2 点跑 → 目标 4/8。
-    用户 4/8 22:00 或 4/9 01:00 说的总结，都应归入 4/8。
-    """
-    yesterday = datetime.now(TZ_CN) - timedelta(days=1)
-    return yesterday.strftime("%Y-%m-%d")
+    hour = datetime.now(TZ_CN).hour
+    if 6 <= hour <= 23:
+        return "realtime"
+    else:
+        return "catchup"
 
 
-def get_note_time_range():
-    """
-    笔记时间范围：目标日 00:00 ~ 次日 04:00（覆盖凌晨说的总结）。
-    返回 (start_iso, end_iso)。
-    """
-    yesterday = datetime.now(TZ_CN) - timedelta(days=1)
-    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(hours=4)
-    return start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
+def get_time_range(mode):
+    """根据模式返回 (target_date, start_time, end_time)"""
+    now = datetime.now(TZ_CN)
+
+    if mode == "realtime":
+        # 实时模式：目标日期 = 今天，时间范围 = 今天 00:00 ~ now
+        target_date = now.strftime("%Y-%m-%d")
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+        return target_date, start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
+    else:
+        # 兜底模式：目标日期 = 昨天，时间范围 = 昨天 00:00 ~ 今天 04:00
+        yesterday = now - timedelta(days=1)
+        target_date = yesterday.strftime("%Y-%m-%d")
+        start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = yesterday.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(hours=4)
+        return target_date, start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
 
 
 def fetch_getnote_notes():
-    """拉取所有笔记，筛选昨天的"""
+    """拉取所有笔记"""
     print("[INFO] 拉取 Get 笔记列表...")
     all_notes = []
     since_id = 0
@@ -127,14 +135,13 @@ def fetch_getnote_notes():
     return all_notes
 
 
-def find_daily_summary(notes, target_date):
-    """从笔记中筛选 tags 包含「每日总结」的，且时间在目标日 00:00 ~ 次日 04:00"""
-    start_time, end_time = get_note_time_range()
+def find_daily_summary(notes, start_time, end_time):
+    """从笔记中筛选 tags 包含「每日总结」的，且在时间范围内"""
     candidates = []
     for note in notes:
         created_at = note.get("created_at", "")
 
-        # 检查时间范围：目标日全天 + 次日凌晨 4 点前
+        # 检查时间范围
         if created_at < start_time or created_at > end_time:
             continue
 
@@ -175,15 +182,15 @@ def get_note_detail(note_id):
     return getnote_get(f"/open/api/v1/resource/note/detail?id={note_id}")
 
 
-def find_notion_page(yesterday_date):
-    """在 Notion 日记中心找到昨天的记录"""
-    print(f"[INFO] 在 Notion 日记中心查找 {yesterday_date} 的记录...")
+def find_notion_page(target_date):
+    """在 Notion 日记中心找到对应日期的记录"""
+    print(f"[INFO] 在 Notion 日记中心查找 {target_date} 的记录...")
     data = notion_post(
         f"/databases/{NOTION_DB_ID}/query",
         {
             "filter": {
                 "property": "日期",
-                "date": {"equals": yesterday_date},
+                "date": {"equals": target_date},
             },
             "page_size": 1,
         },
@@ -197,7 +204,7 @@ def find_notion_page(yesterday_date):
         print(f"[INFO] 找到记录: {title} (id: {page['id']})")
         return page["id"]
     else:
-        print(f"[WARN] 未找到 {yesterday_date} 的日记记录", file=sys.stderr)
+        print(f"[WARN] 未找到 {target_date} 的日记记录", file=sys.stderr)
         return None
 
 
@@ -227,19 +234,21 @@ def update_notion_summary(page_id, content):
 
 
 def main():
-    target_date = get_target_date()
-    start_time, end_time = get_note_time_range()
-    print(f"[INFO] === 开始同步 {target_date} 的每日总结 ===")
+    mode = get_mode()
+    target_date, start_time, end_time = get_time_range(mode)
+
+    mode_label = "实时" if mode == "realtime" else "兜底"
+    print(f"[INFO] === {mode_label}模式：同步 {target_date} 的每日总结 ===")
     print(f"[INFO] 笔记时间范围: {start_time} ~ {end_time}")
 
     # 1. 拉取 Get 笔记
     notes = fetch_getnote_notes()
 
     # 2. 筛选每日总结
-    summaries = find_daily_summary(notes, target_date)
+    summaries = find_daily_summary(notes, start_time, end_time)
 
     if not summaries:
-        print(f"[INFO] {target_date} 没有找到「每日总结」笔记，跳过。")
+        print(f"[INFO] {target_date} 没有找到新的「每日总结」笔记，跳过。")
         return
 
     print(f"[INFO] 找到 {len(summaries)} 条每日总结")
