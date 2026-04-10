@@ -85,11 +85,11 @@ def notion_patch(path, body):
 def get_mode():
     """根据当前时间决定运行模式。
     
-    实时模式：06:00 ~ 23:55 (UTC+8)，每 5 分钟触发，检查今天的笔记
-    兜底模式：00:00 ~ 05:55 (UTC+8)，检查昨天的笔记（覆盖凌晨说的总结）
+    实时模式：04:00 ~ 次日 04:00 (UTC+8)，检查今天 + 凌晨的笔记
+    兜底模式：基本不触发，但如果有则检查前一天的
     """
     hour = datetime.now(TZ_CN).hour
-    if 6 <= hour <= 23:
+    if hour >= 4:
         return "realtime"
     else:
         return "catchup"
