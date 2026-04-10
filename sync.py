@@ -84,10 +84,26 @@ def notion_patch(path, body):
 
 
 # ============ 主逻辑 ============
-def get_yesterday():
-    """获取昨天的日期字符串 (YYYY-MM-DD)"""
+def get_target_date():
+    """
+    获取目标日期（前一天）。
+    凌晨 2 点触发，目标是"昨天"。
+    例如：4/9 凌晨 2 点跑 → 目标 4/8。
+    用户 4/8 22:00 或 4/9 01:00 说的总结，都应归入 4/8。
+    """
     yesterday = datetime.now(TZ_CN) - timedelta(days=1)
     return yesterday.strftime("%Y-%m-%d")
+
+
+def get_note_time_range():
+    """
+    笔记时间范围：目标日 00:00 ~ 次日 04:00（覆盖凌晨说的总结）。
+    返回 (start_iso, end_iso)。
+    """
+    yesterday = datetime.now(TZ_CN) - timedelta(days=1)
+    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(hours=4)
+    return start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
 
 
 def fetch_getnote_notes():
@@ -112,12 +128,14 @@ def fetch_getnote_notes():
 
 
 def find_daily_summary(notes, target_date):
-    """从笔记中筛选 tags 包含「每日总结」的"""
+    """从笔记中筛选 tags 包含「每日总结」的，且时间在目标日 00:00 ~ 次日 04:00"""
+    start_time, end_time = get_note_time_range()
     candidates = []
     for note in notes:
         created_at = note.get("created_at", "")
-        # 只看目标日期的笔记
-        if not created_at.startswith(target_date):
+
+        # 检查时间范围：目标日全天 + 次日凌晨 4 点前
+        if created_at < start_time or created_at > end_time:
             continue
 
         tags = note.get("tags", [])
@@ -209,17 +227,19 @@ def update_notion_summary(page_id, content):
 
 
 def main():
-    yesterday = get_yesterday()
-    print(f"[INFO] === 开始同步 {yesterday} 的每日总结 ===")
+    target_date = get_target_date()
+    start_time, end_time = get_note_time_range()
+    print(f"[INFO] === 开始同步 {target_date} 的每日总结 ===")
+    print(f"[INFO] 笔记时间范围: {start_time} ~ {end_time}")
 
     # 1. 拉取 Get 笔记
     notes = fetch_getnote_notes()
 
     # 2. 筛选每日总结
-    summaries = find_daily_summary(notes, yesterday)
+    summaries = find_daily_summary(notes, target_date)
 
     if not summaries:
-        print(f"[INFO] {yesterday} 没有找到「每日总结」笔记，跳过。")
+        print(f"[INFO] {target_date} 没有找到「每日总结」笔记，跳过。")
         return
 
     print(f"[INFO] 找到 {len(summaries)} 条每日总结")
@@ -242,15 +262,15 @@ def main():
     print(f"[INFO] 总结内容预览: {final_content[:100]}...")
 
     # 3. 找到 Notion 日记页面
-    page_id = find_notion_page(yesterday)
+    page_id = find_notion_page(target_date)
     if not page_id:
-        print(f"[ERROR] 无法找到 {yesterday} 的日记页面", file=sys.stderr)
+        print(f"[ERROR] 无法找到 {target_date} 的日记页面", file=sys.stderr)
         sys.exit(1)
 
     # 4. 写入 Notion
     update_notion_summary(page_id, final_content)
 
-    print(f"[INFO] ✅ 同步完成！{yesterday} 的每日总结已写入 Notion。")
+    print(f"[INFO] ✅ 同步完成！{target_date} 的每日总结已写入 Notion。")
 
 
 if __name__ == "__main__":
