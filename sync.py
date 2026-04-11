@@ -56,21 +56,27 @@ SLEEP_DB_ID = "1ba33b33-7f23-8054-988c-c976153e354a"
 
 
 # ============ 工具函数 ============
-def api_call(url, method="GET", body=None, headers=None, retries=3):
+import socket
+socket.setdefaulttimeout(30)
+
+def api_call(url, method="GET", body=None, headers=None, retries=5):
     """通用 API 请求（带重试）"""
     hdrs = headers or {}
     req = Request(url, method=method, data=json.dumps(body).encode() if body else None, headers=hdrs)
     for attempt in range(retries):
         try:
-            resp = urlopen(req)
+            resp = urlopen(req, timeout=30)
             return json.loads(resp.read())
         except Exception as e:
-            if attempt < retries - 1 and "429" in str(e):
+            err_str = str(e)
+            # 需要重试的情况：限流、连接重置、超时
+            retryable = any(kw in err_str for kw in ["429", "Connection reset", "timeout", "timed out", "104", "ConnectionRefused"])
+            if attempt < retries - 1 and retryable:
                 wait = 3 * (attempt + 1)
-                print(f"[WARN] 限流，等待 {wait}s 后重试...", file=sys.stderr)
+                print(f"[WARN] 请求失败 ({err_str[:80]})，{wait}s 后重试 ({attempt+1}/{retries})...", file=sys.stderr)
                 time.sleep(wait)
                 continue
-            print(f"[ERROR] API call failed: {e}", file=sys.stderr)
+            print(f"[ERROR] API call failed after {retries} retries: {e}", file=sys.stderr)
             raise
 
 
