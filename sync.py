@@ -133,28 +133,36 @@ def deepseek_chat(system_prompt, user_message, model="deepseek-chat"):
 
 
 # ============ 时间逻辑 ============
-def get_time_range():
-    """返回 (target_date, start_time, end_time)
-    
-    始终检查今天的数据：
-    - 今天 00:00 ~ now
-    但在凌晨 0~4 点时，同时检查昨天的（覆盖深夜录音）
+def get_target_time_range():
+    """获取目标日期和时间范围
+
+    核心规则：凌晨的录音（00:00~04:59）属于前一天的日记。
+    用户通常在晚上或深夜录「每日总结」，回顾当天发生的事。
+    例如：4/9 凌晨 1:00 录的「每日总结」讲的是 4/8 的事，应写入 4/8 日记。
+
+    每天凌晨 5:00 运行时，检查范围是：昨天 00:00 ~ 今天 04:59
+    全部归到昨天（前一天）的日记。
+
+    Returns:
+        (target_date, start_time, end_time)
+        - target_date: 要写入的日记日期（前一天）
+        - start_time: 笔记筛选起始时间（前一天 00:00）
+        - end_time: 笔记筛选截止时间（今天 04:59）
     """
     now = datetime.now(TZ_CN)
-    today = now.strftime("%Y-%m-%d")
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = now
-    return today, start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
-
-
-def get_catchup_time_range():
-    """凌晨 0~4 点时，额外检查昨天的数据"""
-    now = datetime.now(TZ_CN)
     yesterday = now - timedelta(days=1)
-    yesterday_date = yesterday.strftime("%Y-%m-%d")
+    target_date = yesterday.strftime("%Y-%m-%d")
+
+    # 起始：昨天 00:00
     start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(hours=4)
-    return yesterday_date, start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
+    # 截止：今天 04:59（覆盖到凌晨 5 点前）
+    cutoff_today = now.replace(hour=4, minute=59, second=59, microsecond=0)
+
+    return (
+        target_date,
+        start.strftime("%Y-%m-%d %H:%M"),
+        cutoff_today.strftime("%Y-%m-%d %H:%M"),
+    )
 
 
 # ============ Get 笔记 ============
@@ -425,31 +433,20 @@ def process_date(target_date, start_time, end_time, notes):
 
 def main():
     now = datetime.now(TZ_CN)
-    hour = now.hour
     print(f"[INFO] === 当前时间: {now.strftime('%Y-%m-%d %H:%M')} (UTC+8) ===")
 
-    # 拉取所有笔记（只拉一次）
+    # 拉取所有笔记
     notes = fetch_getnote_notes()
 
-    processed = False
+    # 计算目标日期和时间范围
+    # 凌晨的录音归到前一天，所以检查 昨天 00:00 ~ 今天 04:59
+    target_date, start, end = get_target_time_range()
+    print(f"[INFO] 目标日期: {target_date}，检查范围: {start} ~ {end}")
 
-    # 1. 始终检查今天的数据
-    today_date, start, end = get_time_range()
-    print(f"[INFO] 检查今天 ({today_date}): {start} ~ {end}")
-    if process_date(today_date, start, end, notes):
-        processed = True
-
-    # 2. 凌晨 0~4 点额外检查昨天（覆盖深夜录音）
-    if hour < 4:
-        catchup_date, catchup_start, catchup_end = get_catchup_time_range()
-        print(f"[INFO] 兜底检查昨天 ({catchup_date}): {catchup_start} ~ {catchup_end}")
-        if process_date(catchup_date, catchup_start, catchup_end, notes):
-            processed = True
-
-    if not processed:
-        print("[INFO] 没有需要处理的录音，跳过。")
-    else:
+    if process_date(target_date, start, end, notes):
         print("[INFO] ✅ 全部完成！")
+    else:
+        print("[INFO] 没有需要处理的录音，跳过。")
 
 
 if __name__ == "__main__":

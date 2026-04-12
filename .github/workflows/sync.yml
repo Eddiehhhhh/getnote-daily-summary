@@ -2,12 +2,15 @@ name: Sync Daily Summary
 
 on:
   schedule:
-    # 高频时段：21:00~04:00 (UTC+8) = UTC 13:00~20:00，每 5 分钟
-    - cron: '*/5 13-20 * * *'
-    # 低频时段：04:00~21:00 (UTC+8) = UTC 20:00~13:00，每 2 小时
-    # UTC 20,22,0,2,4,6,8,10,12
-    - cron: '0 0,2,4,6,8,10,12,22 * * *'
+    # 北京时间凌晨 5:00 = UTC 21:00 (前一天)
+    - cron: '0 21 * * *'
   workflow_dispatch:
+  repository_dispatch:
+    types: [sync]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   sync:
