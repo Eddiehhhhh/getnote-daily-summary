@@ -64,6 +64,13 @@ def api_call(url, method="GET", body=None, headers=None, retries=5):
             return json.loads(resp.read())
         except Exception as e:
             err_str = str(e)
+            # 尝试读取错误响应体（Notion 400 会包含详细错误信息）
+            response_body = ""
+            if hasattr(e, 'read'):
+                try:
+                    response_body = e.read().decode('utf-8', errors='replace')[:500]
+                except:
+                    pass
             retryable = any(kw in err_str for kw in ["429", "Connection reset", "timeout", "timed out", "104", "ConnectionRefused"])
             if attempt < retries - 1 and retryable:
                 wait = 3 * (attempt + 1)
@@ -71,6 +78,8 @@ def api_call(url, method="GET", body=None, headers=None, retries=5):
                 time.sleep(wait)
                 continue
             print(f"[ERROR] API call failed after {retries} retries: {e}", file=sys.stderr)
+            if response_body:
+                print(f"[ERROR] Response body: {response_body}", file=sys.stderr)
             raise
 
 
