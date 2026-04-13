@@ -50,6 +50,8 @@ SCORE_OPTIONS = ["糟糕", "较差", "一般", "较好", "完美"]
 HEALTH_OPTIONS = ["很好", "正常", "生病", "较差"]
 
 HEALTH_DB_ID = "17a33b33-7f23-8090-abec-d9fbf88a829a"
+SUCCESS_DB_ID = "17833b33-7f23-80f8-9e7b-f92f036f044c"
+GRATITUDE_DB_ID = "17833b33-7f23-8086-8925-d1d4528f9098"
 EMOTION_DB_ID = "18933b33-7f23-80f0-9d83-ff497ac5a887"
 SLEEP_DB_ID = "1ba33b33-7f23-8054-988c-c976153e354a"
 
@@ -342,6 +344,22 @@ def create_health_record(target_date, health_status):
     return result["id"]
 
 
+def create_relation_record(db_id, title_field, title_value, target_date):
+    """在指定数据库中创建一条记录并返回 ID"""
+    print(f"[INFO] 创建关联记录: {db_id[-8:]} / {title_value[:30]}")
+    result = notion_post(
+        "/pages",
+        {
+            "parent": {"database_id": db_id},
+            "properties": {
+                title_field: {"title": [{"type": "text", "text": {"content": title_value[:100]}}]},
+                "日期": {"date": {"start": target_date}},
+            },
+        },
+    )
+    return result["id"]
+
+
 def update_notion_page(page_id, analysis, target_date):
     update_props = {}
 
@@ -349,19 +367,21 @@ def update_notion_page(page_id, analysis, target_date):
     if analysis.get("score"):
         update_props["评分"] = {"select": {"name": analysis["score"]}}
 
-    # 感恩日记
+    # 感恩日记 - relation（在感恩日记数据库创建记录）
     if analysis.get("gratitude"):
-        text = analysis["gratitude"][:2000]
-        update_props["💗感恩日记"] = {
-            "rich_text": [{"type": "text", "text": {"content": text}}]
-        }
+        try:
+            rid = create_relation_record(GRATITUDE_DB_ID, "感恩日记", analysis["gratitude"], target_date)
+            update_props["感恩日记"] = {"relation": [{"id": rid}]}
+        except Exception as e:
+            print(f"[WARN] 创建感恩日记失败: {e}")
 
-    # 成功日记
+    # 成功日记 - relation（在成功日记数据库创建记录）
     if analysis.get("success"):
-        text = analysis["success"][:2000]
-        update_props["☀️成功日记"] = {
-            "rich_text": [{"type": "text", "text": {"content": text}}]
-        }
+        try:
+            rid = create_relation_record(SUCCESS_DB_ID, "名称", analysis["success"], target_date)
+            update_props["成功日记"] = {"relation": [{"id": rid}]}
+        except Exception as e:
+            print(f"[WARN] 创建成功日记失败: {e}")
 
     # 总结（已排除其他维度的内容）
     if analysis.get("summary"):
