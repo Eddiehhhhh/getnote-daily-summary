@@ -329,7 +329,7 @@ def create_health_record(target_date, health_status):
         return None
     print(f"[INFO] 创建健康记录: {health_status}")
     result = notion_post(
-        f"/databases/{HEALTH_DB_ID}/pages",
+        "/pages",
         {
             "parent": {"database_id": HEALTH_DB_ID},
             "properties": {
