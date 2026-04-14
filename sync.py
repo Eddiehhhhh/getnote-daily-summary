@@ -351,79 +351,83 @@ def find_notion_page(target_date):
         return None
 
 
-def create_health_record(target_date, health_status):
+def update_existing_record(record_id, props):
+    """更新一条已有 Notion 页面的属性"""
+    notion_patch(f"/pages/{record_id}", {"properties": props})
+
+
+def update_health_record(page_id, health_status):
+    """从日记中心找到已关联的健康记录，更新其内容"""
     if not health_status:
-        return None
-    print(f"[INFO] 创建健康记录: {health_status}")
-    result = notion_post(
-        "/pages",
-        {
-            "parent": {"database_id": HEALTH_DB_ID},
-            "properties": {
-                "名称": {"title": [{"type": "text", "text": {"content": health_status}}]},
-                "单选": {"select": {"name": health_status}},
-                "日期": {"date": {"start": target_date}},
-            },
-        },
-    )
-    return result["id"]
+        return
+    page = notion_get(f"/pages/{page_id}")
+    rels = page["properties"].get("健康", {}).get("relation", [])
+    if not rels:
+        print(f"[WARN] 日记页面没有关联健康记录，跳过更新")
+        return
+    record_id = rels[0]["id"]
+    print(f"[INFO] 更新已有健康记录: {health_status} (id={record_id[-8:]})")
+    try:
+        update_existing_record(record_id, {"单选": {"select": {"name": health_status}}})
+    except Exception as e:
+        print(f"[WARN] 更新健康记录失败: {e}")
 
 
-def create_sleep_record(target_date, sleep_data):
-    """在睡眠数据库中创建记录，包含睡眠质量、能量水平、梦境"""
+def update_sleep_record(page_id, sleep_data):
+    """从日记中心找到已关联的睡眠记录，只更新睡眠质量、能量水平、梦境"""
     if not sleep_data or not isinstance(sleep_data, dict):
-        return None
+        return
 
     quality = sleep_data.get("quality")
     energy = sleep_data.get("energy")
     dreams = sleep_data.get("dreams")
 
     if not any([quality, energy, dreams]):
-        return None
+        return
 
-    print(f"[INFO] 创建睡眠记录: quality={quality} energy={energy} has_dreams={bool(dreams)}")
+    # 从日记中心获取已关联的睡眠记录
+    page = notion_get(f"/pages/{page_id}")
+    rels = page["properties"].get("睡眠记录", {}).get("relation", [])
+    if not rels:
+        print(f"[WARN] 日记页面没有关联睡眠记录，跳过更新")
+        return
 
-    # 构建标题
-    title_parts = []
-    if quality:
-        title_parts.append(f"睡眠{quality}")
-    if energy:
-        title_parts.append(f"能量{energy}")
-    title = " | ".join(title_parts) if title_parts else "睡眠记录"
+    record_id = rels[0]["id"]
+    print(f"[INFO] 更新已有睡眠记录: quality={quality} energy={energy} has_dreams={bool(dreams)} (id={record_id[-8:]})")
 
-    props = {
-        "标题": {"title": [{"type": "text", "text": {"content": title}}]},
-        "Date": {"date": {"start": target_date}},
-    }
-
+    props = {}
     if quality:
         props["睡眠质量"] = {"select": {"name": quality}}
     if energy:
         props["能量水平"] = {"select": {"name": energy}}
     if dreams:
+        # 只在用户提到有梦的时候更新，"没做梦"则不动（保留原值"今夜无梦"）
         props["梦境记录"] = {"rich_text": [{"type": "text", "text": {"content": dreams[:2000]}}]}
 
-    result = notion_post(
-        "/pages",
-        {"parent": {"database_id": SLEEP_DB_ID}, "properties": props},
-    )
-    return result["id"]
+    try:
+        update_existing_record(record_id, props)
+    except Exception as e:
+        print(f"[WARN] 更新睡眠记录失败: {e}")
 
 
-def create_relation_record(db_id, title_field, title_value, target_date):
-    """在指定数据库中创建一条记录并返回 ID"""
-    print(f"[INFO] 创建关联记录: {db_id[-8:]} / {title_value[:30]}")
-    result = notion_post(
-        "/pages",
-        {
-            "parent": {"database_id": db_id},
-            "properties": {
-                title_field: {"title": [{"type": "text", "text": {"content": title_value[:100]}}]},
-                "日期": {"date": {"start": target_date}},
-            },
-        },
-    )
-    return result["id"]
+def update_title_record(db_name, page_id, relation_prop, title_field, new_title):
+    """从日记中心找到已关联的记录，只更新其标题"""
+    if not new_title:
+        return
+    page = notion_get(f"/pages/{page_id}")
+    rels = page["properties"].get(relation_prop, {}).get("relation", [])
+    if not rels:
+        print(f"[WARN] 日记页面没有关联{db_name}记录，跳过更新")
+        return
+
+    record_id = rels[0]["id"]
+    print(f"[INFO] 更新已有{db_name}标题: {new_title[:30]}... (id={record_id[-8:]})")
+    try:
+        update_existing_record(record_id, {
+            title_field: {"title": [{"type": "text", "text": {"content": new_title[:100]}}]}
+        })
+    except Exception as e:
+        print(f"[WARN] 更新{db_name}失败: {e}")
 
 
 def update_notion_page(page_id, analysis, target_date):
@@ -433,21 +437,13 @@ def update_notion_page(page_id, analysis, target_date):
     if analysis.get("score"):
         update_props["评分"] = {"select": {"name": analysis["score"]}}
 
-    # 感恩日记 - relation（在感恩日记数据库创建记录）
+    # 感恩日记 - 更新已关联记录的标题
     if analysis.get("gratitude"):
-        try:
-            rid = create_relation_record(GRATITUDE_DB_ID, "感恩日记", analysis["gratitude"], target_date)
-            update_props["感恩日记"] = {"relation": [{"id": rid}]}
-        except Exception as e:
-            print(f"[WARN] 创建感恩日记失败: {e}")
+        update_title_record("感恩日记", page_id, "感恩日记", "感恩日记", analysis["gratitude"])
 
-    # 成功日记 - relation（在成功日记数据库创建记录）
+    # 成功日记 - 更新已关联记录的标题
     if analysis.get("success"):
-        try:
-            rid = create_relation_record(SUCCESS_DB_ID, "名称", analysis["success"], target_date)
-            update_props["成功日记"] = {"relation": [{"id": rid}]}
-        except Exception as e:
-            print(f"[WARN] 创建成功日记失败: {e}")
+        update_title_record("成功日记", page_id, "成功日记", "名称", analysis["success"])
 
     # 总结（已排除其他维度的内容）
     if analysis.get("summary"):
@@ -473,20 +469,13 @@ def update_notion_page(page_id, analysis, target_date):
                 print(f"[WARN] 更新情绪日期失败: {e}")
             update_props["情绪"] = {"relation": [{"id": emotion_page_id}]}
 
-    # 健康 - 创建记录并关联
+    # 健康 - 更新已关联记录
     if analysis.get("health"):
-        health_record_id = create_health_record(target_date, analysis["health"])
-        if health_record_id:
-            update_props["健康"] = {"relation": [{"id": health_record_id}]}
+        update_health_record(page_id, analysis["health"])
 
-    # 睡眠记录 - 在睡眠数据库创建记录并关联到日记中心
+    # 睡眠记录 - 更新已关联记录（只改睡眠质量、能量水平、梦境）
     if analysis.get("sleep"):
-        try:
-            sleep_record_id = create_sleep_record(target_date, analysis["sleep"])
-            if sleep_record_id:
-                update_props["睡眠记录"] = {"relation": [{"id": sleep_record_id}]}
-        except Exception as e:
-            print(f"[WARN] 创建睡眠记录失败: {e}")
+        update_sleep_record(page_id, analysis["sleep"])
 
     if not update_props:
         print("[INFO] 没有需要更新的字段")
