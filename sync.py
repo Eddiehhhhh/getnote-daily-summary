@@ -105,6 +105,16 @@ def notion_post(path, body):
     )
 
 
+def notion_get(path):
+    return api_call(
+        f"https://api.notion.com/v1{path}",
+        headers={
+            "Authorization": f"Bearer {NOTION_TOKEN}",
+            "Notion-Version": "2022-06-28",
+        },
+    )
+
+
 def notion_patch(path, body):
     return api_call(
         f"https://api.notion.com/v1{path}",
@@ -356,71 +366,10 @@ def update_existing_record(record_id, props):
     notion_patch(f"/pages/{record_id}", {"properties": props})
 
 
-def update_health_record(page_id, health_status):
-    """从日记中心找到已关联的健康记录，更新其内容"""
-    if not health_status:
+def update_title_record(record_id, db_name, title_field, new_title):
+    """更新已有关联记录的标题"""
+    if not record_id or not new_title:
         return
-    page = notion_get(f"/pages/{page_id}")
-    rels = page["properties"].get("健康", {}).get("relation", [])
-    if not rels:
-        print(f"[WARN] 日记页面没有关联健康记录，跳过更新")
-        return
-    record_id = rels[0]["id"]
-    print(f"[INFO] 更新已有健康记录: {health_status} (id={record_id[-8:]})")
-    try:
-        update_existing_record(record_id, {"单选": {"select": {"name": health_status}}})
-    except Exception as e:
-        print(f"[WARN] 更新健康记录失败: {e}")
-
-
-def update_sleep_record(page_id, sleep_data):
-    """从日记中心找到已关联的睡眠记录，只更新睡眠质量、能量水平、梦境"""
-    if not sleep_data or not isinstance(sleep_data, dict):
-        return
-
-    quality = sleep_data.get("quality")
-    energy = sleep_data.get("energy")
-    dreams = sleep_data.get("dreams")
-
-    if not any([quality, energy, dreams]):
-        return
-
-    # 从日记中心获取已关联的睡眠记录
-    page = notion_get(f"/pages/{page_id}")
-    rels = page["properties"].get("睡眠记录", {}).get("relation", [])
-    if not rels:
-        print(f"[WARN] 日记页面没有关联睡眠记录，跳过更新")
-        return
-
-    record_id = rels[0]["id"]
-    print(f"[INFO] 更新已有睡眠记录: quality={quality} energy={energy} has_dreams={bool(dreams)} (id={record_id[-8:]})")
-
-    props = {}
-    if quality:
-        props["睡眠质量"] = {"select": {"name": quality}}
-    if energy:
-        props["能量水平"] = {"select": {"name": energy}}
-    if dreams:
-        # 只在用户提到有梦的时候更新，"没做梦"则不动（保留原值"今夜无梦"）
-        props["梦境记录"] = {"rich_text": [{"type": "text", "text": {"content": dreams[:2000]}}]}
-
-    try:
-        update_existing_record(record_id, props)
-    except Exception as e:
-        print(f"[WARN] 更新睡眠记录失败: {e}")
-
-
-def update_title_record(db_name, page_id, relation_prop, title_field, new_title):
-    """从日记中心找到已关联的记录，只更新其标题"""
-    if not new_title:
-        return
-    page = notion_get(f"/pages/{page_id}")
-    rels = page["properties"].get(relation_prop, {}).get("relation", [])
-    if not rels:
-        print(f"[WARN] 日记页面没有关联{db_name}记录，跳过更新")
-        return
-
-    record_id = rels[0]["id"]
     print(f"[INFO] 更新已有{db_name}标题: {new_title[:30]}... (id={record_id[-8:]})")
     try:
         update_existing_record(record_id, {
@@ -430,20 +379,39 @@ def update_title_record(db_name, page_id, relation_prop, title_field, new_title)
         print(f"[WARN] 更新{db_name}失败: {e}")
 
 
+def get_page_relations(page_id):
+    """获取日记页面中各字段关联的记录 ID，只调用一次 Notion API"""
+    page = notion_get(f"/pages/{page_id}")
+    props = page["properties"]
+    return {
+        "sleep": props.get("睡眠记录", {}).get("relation", []),
+        "health": props.get("健康", {}).get("relation", []),
+        "success": props.get("成功日记", {}).get("relation", []),
+        "gratitude": props.get("感恩日记", {}).get("relation", []),
+    }
+
+
 def update_notion_page(page_id, analysis, target_date):
     update_props = {}
+
+    # 一次性获取所有关联记录
+    rels = get_page_relations(page_id)
 
     # 评分
     if analysis.get("score"):
         update_props["评分"] = {"select": {"name": analysis["score"]}}
 
     # 感恩日记 - 更新已关联记录的标题
-    if analysis.get("gratitude"):
-        update_title_record("感恩日记", page_id, "感恩日记", "感恩日记", analysis["gratitude"])
+    if analysis.get("gratitude") and rels["gratitude"]:
+        update_title_record(
+            rels["gratitude"][0]["id"], "感恩日记", "感恩日记", analysis["gratitude"]
+        )
 
     # 成功日记 - 更新已关联记录的标题
-    if analysis.get("success"):
-        update_title_record("成功日记", page_id, "成功日记", "名称", analysis["success"])
+    if analysis.get("success") and rels["success"]:
+        update_title_record(
+            rels["success"][0]["id"], "成功日记", "名称", analysis["success"]
+        )
 
     # 总结（已排除其他维度的内容）
     if analysis.get("summary"):
@@ -470,12 +438,34 @@ def update_notion_page(page_id, analysis, target_date):
             update_props["情绪"] = {"relation": [{"id": emotion_page_id}]}
 
     # 健康 - 更新已关联记录
-    if analysis.get("health"):
-        update_health_record(page_id, analysis["health"])
+    if analysis.get("health") and rels["health"]:
+        record_id = rels["health"][0]["id"]
+        print(f"[INFO] 更新已有健康记录: {analysis['health']} (id={record_id[-8:]})")
+        try:
+            update_existing_record(record_id, {"单选": {"select": {"name": analysis["health"]}}})
+        except Exception as e:
+            print(f"[WARN] 更新健康记录失败: {e}")
 
     # 睡眠记录 - 更新已关联记录（只改睡眠质量、能量水平、梦境）
-    if analysis.get("sleep"):
-        update_sleep_record(page_id, analysis["sleep"])
+    if analysis.get("sleep") and rels["sleep"]:
+        sleep_data = analysis["sleep"]
+        quality = sleep_data.get("quality")
+        energy = sleep_data.get("energy")
+        dreams = sleep_data.get("dreams")
+        if any([quality, energy, dreams]):
+            record_id = rels["sleep"][0]["id"]
+            print(f"[INFO] 更新已有睡眠记录: quality={quality} energy={energy} has_dreams={bool(dreams)} (id={record_id[-8:]})")
+            props = {}
+            if quality:
+                props["睡眠质量"] = {"select": {"name": quality}}
+            if energy:
+                props["能量水平"] = {"select": {"name": energy}}
+            if dreams:
+                props["梦境记录"] = {"rich_text": [{"type": "text", "text": {"content": dreams[:2000]}}]}
+            try:
+                update_existing_record(record_id, props)
+            except Exception as e:
+                print(f"[WARN] 更新睡眠记录失败: {e}")
 
     if not update_props:
         print("[INFO] 没有需要更新的字段")
