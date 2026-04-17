@@ -253,20 +253,23 @@ def find_daily_notes(notes, start_time, end_time):
         if not original_text:
             continue
 
-        # 检查原文中是否有日记总结相关的关键字
+        # 检查原文或标题中是否有日记总结相关的关键字
         daily_keywords = ["每日总结", "日常总结", "今日总结", "每日记录", "今日情绪"]
+        note_title = note.get("title", "")
         has_keyword = any(kw in original_text for kw in daily_keywords)
+        has_title_keyword = any(kw in note_title for kw in daily_keywords)
 
-        if not has_tag and not has_keyword:
+        if not has_tag and not has_keyword and not has_title_keyword:
             continue
 
+        matched_by = "tag" if has_tag else ("title" if has_title_keyword else "keyword")
         candidates.append({
             "note_id": note.get("note_id", ""),
             "title": note.get("title", ""),
             "original_text": original_text.strip(),
             "type": note.get("note_type", ""),
             "created_at": created_at,
-            "matched_by": "tag" if has_tag else "keyword",
+            "matched_by": matched_by,
         })
 
     # 按 created_at 排序
