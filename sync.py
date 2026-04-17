@@ -5,7 +5,7 @@ Get 笔记「每日日记」→ AI 分析 → Notion 日记中心 自动同步
 流程：
 1. 从 Get 笔记 API 拉取录音笔记
 2. 获取语音转写原文 (audio.original)
-3. 从原文中检测是否包含「每日总结」关键字
+3. 从原文中检测是否包含日记总结关键字（每日总结/日常总结/今日总结/每日记录/今日情绪）
 4. 调用 DeepSeek AI 分析原文，提取各维度
 5. 将结果写入 Notion 日记中心对应字段
 """
@@ -253,8 +253,9 @@ def find_daily_notes(notes, start_time, end_time):
         if not original_text:
             continue
 
-        # 检查原文中是否有「每日总结」
-        has_keyword = "每日总结" in original_text
+        # 检查原文中是否有日记总结相关的关键字
+        daily_keywords = ["每日总结", "日常总结", "今日总结", "每日记录", "今日情绪"]
+        has_keyword = any(kw in original_text for kw in daily_keywords)
 
         if not has_tag and not has_keyword:
             continue
@@ -279,7 +280,7 @@ ENERGY_LEVEL_OPTIONS = ["充沛", "一般", "疲惫"]
 
 ANALYSIS_PROMPT = """你是一个日记分析助手。用户会给你一段口语化的录音转写原文，你需要从中提取多个维度的信息，以 JSON 格式返回。
 
-用户会在录音开头说"每日总结"，之后的内容是自由表达的日记。请分析并提取以下字段（如果没提到，设为 null）：
+用户会在录音中说"每日总结"或类似的关键字（如"日常总结""今日总结"等），之后是自由表达的日记。请分析并提取以下字段（如果没提到，设为 null）：
 
 1. "score": 今日整体评分。可选值：["糟糕", "较差", "一般", "较好", "完美"]。用户可能说"今天一般般"、"感觉不太好"、"完美的一天"等。
 
