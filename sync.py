@@ -5,7 +5,7 @@ Get 笔记「每日日记」→ AI 分析 → Notion 日记中心 自动同步
 流程：
 1. 从 Get 笔记 API 拉取录音笔记
 2. 获取语音转写原文 (audio.original)
-3. 从原文中检测是否包含日记总结关键字（每日总结/日常总结/今日总结/每日记录/今日情绪）
+3. 从原文中检测是否包含「每日总结」关键字
 4. 调用 DeepSeek AI 分析原文，提取各维度
 5. 将结果写入 Notion 日记中心对应字段
 """
@@ -231,11 +231,14 @@ def get_note_original_text(note):
         return note.get("content", "")
 
 
+DAILY_KEYWORDS = ["每日总结", "日常总结", "今日总结", "每日记录", "今日情绪"]
+
+
 def find_daily_notes(notes, start_time, end_time):
     """从所有笔记中筛选：
     1. 录音类型 或 有内容的笔记
     2. 时间在范围内
-    3. 原文中包含「每日总结」
+    3. 标签包含「每日总结」或 标题/原文包含日记总结关键字
     """
     candidates = []
     for note in notes:
@@ -248,18 +251,22 @@ def find_daily_notes(notes, start_time, end_time):
         tag_names = [t.get("name", "") for t in tags]
         has_tag = "每日总结" in tag_names
 
-        # 获取原文
-        original_text = get_note_original_text(note)
+        # 检查标题（无需获取详情）
+        note_title = note.get("title", "")
+        has_title_keyword = any(kw in note_title for kw in DAILY_KEYWORDS)
+
+        # 获取原文（只在标题匹配或标签匹配时才获取，节省 API 调用）
+        original_text = ""
+        if has_tag or has_title_keyword:
+            original_text = get_note_original_text(note)
+
         if not original_text:
             continue
 
-        # 检查原文或标题中是否有日记总结相关的关键字
-        daily_keywords = ["每日总结", "日常总结", "今日总结", "每日记录", "今日情绪"]
-        note_title = note.get("title", "")
-        has_keyword = any(kw in original_text for kw in daily_keywords)
-        has_title_keyword = any(kw in note_title for kw in daily_keywords)
+        # 检查原文中是否有关键字
+        has_text_keyword = any(kw in original_text for kw in DAILY_KEYWORDS)
 
-        if not has_tag and not has_keyword and not has_title_keyword:
+        if not has_tag and not has_title_keyword and not has_text_keyword:
             continue
 
         matched_by = "tag" if has_tag else ("title" if has_title_keyword else "keyword")
@@ -283,31 +290,38 @@ ENERGY_LEVEL_OPTIONS = ["充沛", "一般", "疲惫"]
 
 ANALYSIS_PROMPT = """你是一个日记分析助手。用户会给你一段口语化的录音转写原文，你需要从中提取多个维度的信息，以 JSON 格式返回。
 
-用户会在录音中说"每日总结"或类似的关键字（如"日常总结""今日总结"等），之后是自由表达的日记。请分析并提取以下字段（如果没提到，设为 null）：
+请分析并提取以下字段（如果没提到，设为 null）：
 
-1. "score": 今日整体评分。可选值：["糟糕", "较差", "一般", "较好", "完美"]。用户可能说"今天一般般"、"感觉不太好"、"完美的一天"等。
+1. "score": 今日整体评分。可选值：["糟糕", "较差", "一般", "较好", "完美"]。
 
-2. "health": 今日健康状况。可选值：["很好", "正常", "生病", "较差"]。如果用户提到身体不适、感冒、头疼、肚子疼等。
+2. "health": 今日健康状况。可选值：["很好", "正常", "生病", "较差"]。如果用户提到身体不适、感冒、头疼、肚子疼、健康相关内容。
 
-3. "emotion": 今日主要情绪。可选值：["喜悦", "平静", "悲伤", "感动", "愤怒", "放松", "沮丧", "混沌", "激动", "烦躁", "焦虑", "疲惫", "痛苦", "紧张"]。只选最匹配的一个。
+3. "emotion": 今日主要情绪。可选值：["喜悦", "平静", "悲伤", "感动", "愤怒", "放松", "沮丧", "混沌", "激动", "烦躁", "焦虑", "疲惫", "痛苦", "紧张"]。如果用户表达了多种情绪，只选**最主要的**那一个。
 
 4. "sleep": 睡眠相关信息（对象，如果没提到任何睡眠内容则为 null）。包含子字段：
    - "quality": 睡眠质量。可选值：["优秀", "良好", "一般", "差"]。
    - "energy": 醒来后能量水平。可选值：["充沛", "一般", "疲惫"]。
    - "dreams": 梦境记录。如果用户提到做梦的内容，整理成文字（50-200字）。没提到则为 null。
-   用户可能说"昨晚睡得很好"、"凌晨三点才睡"、"做了个奇怪的梦"、"感觉没精神"等。
 
 5. "gratitude": 感恩日记。如果用户提到感恩、感谢、感激的人或事，整理成通顺文字（50-200字）。
 
 6. "success": 成功日记。如果用户提到成就、进步、完成的事、做得好的事，整理成通顺文字（50-200字）。
 
-7. "banana": 是否放纵。用户提到「放纵」「打飞机」「自慰」「手淫」「撸管」等关键词时为 true。如果明确说「没放纵」「忍住了」则为 false。没提到则为 null。
+7. "banana": 是否提到自慰相关内容。布尔值 true/false。
 
-8. "summary": 今日总结。**重要**：排除以上所有已提取的维度内容后，将剩余内容整理成通顺的总结（100-300字）。
-   - 如果用户说了"今天状态一般"并已被提取为 score=一般，那总结里不要重复说"状态一般"
-   - 如果用户说了"今天感冒了"并已被提取为 health=生病，那总结里不要重复说生病
-   - 如果用户说了睡眠相关内容并已被提取为 sleep，那总结里不要重复提睡眠
-   - 总结只保留纯粹的日常事件、想法、经历
+8. "summary": 今日总结。**最关键的规则：总结是"剔除了结构化字段之后的剩余内容"。**
+
+   写总结时，你必须先在心里完成这个排除：
+   - score → 剔除：评分相关（"今天一般般"、"感觉不好"、"状态可以"等评价性描述）
+   - health → 剔除：健康相关（"身体还好"、"有点感冒"、"嗓子疼"等身体状况描述）
+   - emotion → 剔除：所有情绪描述（"心情平静"、"有点烦躁"、"挺开心的"、"感觉疲惫"等情绪表达）
+   - sleep → 剔除：睡眠相关（几点睡、几点起、睡得好不好、做了什么梦、醒了状态如何等）
+   - gratitude → 剔除：感恩感谢相关
+   - success → 剔除：成就进步相关
+   - banana → 剔除：放纵相关
+
+   总结只保留：**纯粹的日常事件、具体活动、社交互动、见闻、想法思考**。
+   如果剔除结构化字段后没什么内容了，总结可以简短（甚至50字），或者设为 null。宁可简短也不要重复。
 
 重要规则：
 - 只返回 JSON，不要任何解释
