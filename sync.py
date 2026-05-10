@@ -428,6 +428,57 @@ def get_page_relations(page_id):
     }
 
 
+def get_or_create_emotion_page(emotion_name, template_id, target_date):
+    """查找或创建情绪记录（使用模板结构）
+
+    先按「名称 + 创建日期」查重，已有则复用；
+    没有则新建页面，再把模板页的 blocks 拷贝过来。
+    """
+    # 查重：同名 + 同日期是否已存在
+    data = notion_post(f"/databases/{EMOTION_DB_ID}/query", {
+        "filter": {
+            "and": [
+                {"property": "名称", "title": {"equals": emotion_name}},
+                {"property": "创建日期", "date": {"equals": target_date}},
+            ]
+        }
+    })
+    results = data.get("results", [])
+    if results:
+        page_id = results[0]["id"]
+        print(f"[INFO] 复用已有情绪记录: {emotion_name} (id={page_id[-8:]})")
+        return page_id
+
+    # 新建空页面
+    print(f"[INFO] 新建情绪记录: {emotion_name}")
+    body = {
+        "parent": {"database_id": EMOTION_DB_ID},
+        "properties": {
+            "名称": {"title": [{"text": {"content": emotion_name}}]},
+            "创建日期": {"date": {"start": target_date}},
+        },
+    }
+    result = notion_post("/pages", body)
+    new_page_id = result["id"]
+    print(f"[INFO] 新建情绪记录成功: {new_page_id[-8:]}, 拷贝模板 blocks...")
+
+    # 把模板页的 blocks 拷贝到新页面
+    try:
+        template_data = notion_get(f"/blocks/{template_id}/children")
+        blocks = template_data.get("results", [])
+        if blocks:
+            notion_patch(f"/blocks/{new_page_id}/children", {
+                "children": blocks[:100]
+            })
+            print(f"[INFO] 已拷贝 {len(blocks[:100])} 个模板 blocks")
+        else:
+            print(f"[INFO] 模板无 blocks，跳过拷贝")
+    except Exception as e:
+        print(f"[WARN] 拷贝模板 blocks 失败（不影响主流程）: {e}")
+
+    return new_page_id
+
+
 def update_notion_page(page_id, analysis, target_date):
     update_props = {}
 
@@ -461,19 +512,14 @@ def update_notion_page(page_id, analysis, target_date):
     if analysis.get("banana") is not None:
         update_props["🍌"] = {"checkbox": analysis["banana"]}
 
-    # 情绪 - 关联已有记录（支持多个）
+    # 情绪 - 查找/新建（从模板），支持多个
     if analysis.get("emotion"):
         emotion_relations = []
         for emotion_name in analysis["emotion"]:
-            emotion_page_id = EMOTION_MAP.get(emotion_name)
-            if emotion_page_id:
-                try:
-                    notion_patch(f"/pages/{emotion_page_id}", {
-                        "properties": {"创建日期": {"date": {"start": target_date}}}
-                    })
-                except Exception as e:
-                    print(f"[WARN] 更新情绪日期失败: {e}")
-                emotion_relations.append({"id": emotion_page_id})
+            template_id = EMOTION_MAP.get(emotion_name)
+            if template_id:
+                page_id = get_or_create_emotion_page(emotion_name, template_id, target_date)
+                emotion_relations.append({"id": page_id})
         if emotion_relations:
             update_props["情绪"] = {"relation": emotion_relations}
 
