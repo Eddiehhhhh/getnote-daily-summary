@@ -2,8 +2,9 @@ name: Sync Daily Summary
 
 on:
   schedule:
-    # 北京时间凌晨 5:00 = UTC 21:00 (前一天)
-    - cron: '0 21 * * *'
+    # 北京时间下午 13:00 = UTC 05:00
+    # 此时已过中午 12:00，可覆盖完整的「昨晚 22:00 ~ 今天 11:59」范围
+    - cron: '0 5 * * *'
   workflow_dispatch:
   repository_dispatch:
     types: [sync]

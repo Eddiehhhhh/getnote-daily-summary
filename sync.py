@@ -157,27 +157,28 @@ def deepseek_chat(system_prompt, user_message, model="deepseek-chat"):
 def get_target_time_range():
     """获取目标日期和时间范围
 
-    核心规则：凌晨的录音（00:00~04:59）属于前一天的日记。
-    用户通常在晚上或深夜录「每日总结」，回顾当天发生的事。
-    例如：4/9 凌晨 1:00 录的「每日总结」讲的是 4/8 的事，应写入 4/8 日记。
+    核心规则：昨晚 22:00 到今天 11:59 之间的录音，全部归入昨天的日记。
+    用户录「每日总结」的习惯时间段是晚上 22:00 ~ 次日中午 12:00，
+    这段时间内录的内容讲的都是昨天发生的事。
+    例如：5/9 上午 10:00 录的「每日总结」讲的是 5/8 的事，应写入 5/8 日记。
 
-    每天凌晨 5:00 运行时，检查范围是：昨天 00:00 ~ 今天 04:59
-    全部归到昨天（前一天）的日记。
+    脚本在每天下午 13:00 运行，此时已过了中午 12:00，
+    检查范围：昨天 22:00 ~ 今天 11:59，全部归到昨天的日记。
 
     Returns:
         (target_date, start_time, end_time)
         - target_date: 要写入的日记日期（前一天）
-        - start_time: 笔记筛选起始时间（前一天 00:00）
-        - end_time: 笔记筛选截止时间（今天 04:59）
+        - start_time: 笔记筛选起始时间（前一天 22:00）
+        - end_time: 笔记筛选截止时间（今天 11:59）
     """
     now = datetime.now(TZ_CN)
     yesterday = now - timedelta(days=1)
     target_date = yesterday.strftime("%Y-%m-%d")
 
-    # 起始：昨天 00:00
-    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    # 截止：今天 04:59（覆盖到凌晨 5 点前）
-    cutoff_today = now.replace(hour=4, minute=59, second=59, microsecond=0)
+    # 起始：昨天 22:00（用户开始录「每日总结」的最早时间）
+    start = yesterday.replace(hour=22, minute=0, second=0, microsecond=0)
+    # 截止：今天 11:59（中午 12 点前都算昨天的）
+    cutoff_today = now.replace(hour=11, minute=59, second=59, microsecond=0)
 
     return (
         target_date,
