@@ -115,7 +115,12 @@ def notion_get(path):
     )
 
 
+import json as _json
 def notion_patch(path, body):
+    _body_str = _json.dumps(body, ensure_ascii=False)
+    print(f"[DEBUG] notion_patch {path}")
+    print(f"[DEBUG] Body keys: {list(body.get('properties', {}).keys())}")
+    print(f"[DEBUG] Body preview: {_body_str[:300]}")
     return api_call(
         f"https://api.notion.com/v1{path}",
         method="PATCH",
