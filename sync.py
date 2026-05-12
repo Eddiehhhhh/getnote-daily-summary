@@ -523,8 +523,8 @@ def update_notion_page(page_id, analysis, target_date):
         for emotion_name in analysis["emotion"]:
             template_id = EMOTION_MAP.get(emotion_name)
             if template_id:
-                page_id = get_or_create_emotion_page(emotion_name, template_id, target_date)
-                emotion_relations.append({"id": page_id})
+                emotion_page_id = get_or_create_emotion_page(emotion_name, template_id, target_date)
+                emotion_relations.append({"id": emotion_page_id})
         if emotion_relations:
             update_props["情绪"] = {"relation": emotion_relations}
 
@@ -563,6 +563,8 @@ def update_notion_page(page_id, analysis, target_date):
         return
 
     print(f"[INFO] 更新 Notion 页面，字段: {list(update_props.keys())}")
+    print(f"[DEBUG] >>> 更新日记页面: {page_id}")
+    print(f"[DEBUG] update_props: {list(update_props.keys())}")
     notion_patch(f"/pages/{page_id}", {"properties": update_props})
     print(f"[INFO] ✅ Notion 更新完成")
 
