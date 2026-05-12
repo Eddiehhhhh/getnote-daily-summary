@@ -2,8 +2,10 @@ name: Sync Daily Summary
 
 on:
   schedule:
+    # 北京时间凌晨 6:00 = UTC 22:00（前一天晚上）
     # 北京时间下午 13:00 = UTC 05:00
-    # 此时已过中午 12:00，可覆盖完整的「昨晚 22:00 ~ 今天 11:59」范围
+    # 每天跑两次，覆盖「昨晚22:00 ~ 今天中午」的所有录音
+    - cron: '0 22 * * *'
     - cron: '0 5 * * *'
   workflow_dispatch:
   repository_dispatch:
