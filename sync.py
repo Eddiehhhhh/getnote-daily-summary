@@ -115,12 +115,7 @@ def notion_get(path):
     )
 
 
-import json as _json
 def notion_patch(path, body):
-    _body_str = _json.dumps(body, ensure_ascii=False)
-    print(f"[DEBUG] notion_patch {path}")
-    print(f"[DEBUG] Body keys: {list(body.get('properties', {}).keys())}")
-    print(f"[DEBUG] Body preview: {_body_str[:300]}")
     return api_call(
         f"https://api.notion.com/v1{path}",
         method="PATCH",
@@ -563,8 +558,6 @@ def update_notion_page(page_id, analysis, target_date):
         return
 
     print(f"[INFO] 更新 Notion 页面，字段: {list(update_props.keys())}")
-    print(f"[DEBUG] >>> 更新日记页面: {page_id}")
-    print(f"[DEBUG] update_props: {list(update_props.keys())}")
     notion_patch(f"/pages/{page_id}", {"properties": update_props})
     print(f"[INFO] ✅ Notion 更新完成")
 
