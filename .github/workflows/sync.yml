@@ -38,3 +38,14 @@ jobs:
           NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: python sync.py
+
+      - name: Upload harness run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-run-state
+          path: |
+            .harness/latest-run.json
+            .harness/workflow-state.json
+            .harness/runs/*.json
+          if-no-files-found: ignore
