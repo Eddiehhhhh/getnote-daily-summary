@@ -1,0 +1,19 @@
+[
+  {
+    "name": "multi-emotion-and-health-detail",
+    "original_text": "每日总结。今天整体一般，心情比较平静，也有一点疲惫。身体基本正常，但是腰有点酸，可能是昨天健身后留下的。今天补了几篇日记，下午去了咖啡店，晚上看了电影。",
+    "expected": {
+      "score": "一般",
+      "health": "正常",
+      "emotion": ["平静", "疲惫"]
+    }
+  },
+  {
+    "name": "gratitude-success-sleep",
+    "original_text": "每日总结。今天状态较好，挺放松的。昨晚睡眠质量还不错，醒来能量也比较充沛。今天最满意的是把拖了很久的项目方案终于整理完了，也很感谢朋友晚上陪我聊天。",
+    "expected": {
+      "score": "较好",
+      "emotion": ["放松"]
+    }
+  }
+]
